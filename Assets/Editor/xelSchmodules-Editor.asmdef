@@ -1,0 +1,10 @@
+{
+  "name": "xelSchmodules-Editor",
+  "references": [
+    "xelSchmodules"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": []
+}

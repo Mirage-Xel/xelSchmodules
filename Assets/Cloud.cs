@@ -1,11 +1,8 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-
+﻿using UnityEngine;
 public class Cloud : MonoBehaviour {
     KMSelectable[] dots;
     DotClouds module;
-    [SerializeField] int index;
+    public string index;
 	// Use this for initialization
 	void Awake () {
         dots = GetComponentsInChildren<KMSelectable>();
@@ -31,6 +28,7 @@ public class Cloud : MonoBehaviour {
         solution.OnInteract += delegate { if (!module.solved)
             {
                 module.GetComponent<KMBombModule>().HandlePass();
+                module.GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.CorrectChime, transform);
                 Debug.LogFormat("[Dot Clouds #{0}] Pressed the lone dot. Module solved", module.id);
                 module.solved = true;
             }

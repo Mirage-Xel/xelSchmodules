@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
@@ -64,7 +65,7 @@ public partial class CommunityFeaturesDownloader
             };
         }
 
-        public abstract void Draw();
+        public abstract bool Draw();
 
         public virtual void Fetch()
         {
@@ -91,10 +92,11 @@ public partial class CommunityFeaturesDownloader
             return info;
         }
 
-        public override void Draw()
+        public override bool Draw()
         {
             GUILayout.Label(ConvertedBytes, GUILayout.ExpandWidth(false));
             GUILayout.Space(5);
+            return true;
         }
 
         public override void Fetch()
@@ -124,7 +126,11 @@ public partial class CommunityFeaturesDownloader
             }
         }
         private string Repo;
+        private bool UseSourceCode;
         private string ContentType;
+        private string[] ContentTypes = new string[0];
+        private string NamePattern;
+        private string TagPattern;
         private int PageNumber = 1;
         private WWW CurrentRequest;
         private int LastSelectedAssetIndex = -1;
@@ -140,15 +146,26 @@ public partial class CommunityFeaturesDownloader
         public override DownloadInfo Download()
         {
             var info = base.Download();
-            var Release = Releases[SelectedVersionIndex];
-            var asset = Release.assets[SelectedAssetIndex];
-            Downloader.Download(asset.browser_download_url, asset.size);
-            info.Info = Release.tag_name;
+            var release = Releases[SelectedVersionIndex];
+            Downloader.IsSourceCode = UseSourceCode;
+            if (UseSourceCode)
+            {
+                Downloader.Filename = release.tag_name + ".zip";
+                Downloader.Download(release.zipball_url, 0);
+            }
+            else
+            {
+                var asset = release.assets[SelectedAssetIndex];
+                Downloader.Download(asset.browser_download_url, asset.size);
+            }
+            info.Info = release.tag_name;
             return info;
         }
 
-        public override void Draw()
+        public override bool Draw()
         {
+            if(VersionTags == null || VersionTags.Length == 0)
+                return false;
             SelectedVersionIndex = EditorGUILayout.Popup(SelectedVersionIndex, VersionTags, GUILayout.Width(DropdownWidth));
             var update = false;
             if (SelectedVersionIndex != LastSelectedVersionIndex)
@@ -159,12 +176,16 @@ public partial class CommunityFeaturesDownloader
                 SelectedAssetIndex = index == -1 ? 0 : index;
                 LastSelectedVersionIndex = SelectedVersionIndex;
             }
-            SelectedAssetIndex = EditorGUILayout.Popup(SelectedAssetIndex, Assets, GUILayout.Width(DropdownWidth));
-            if (update || SelectedAssetIndex != LastSelectedAssetIndex)
+            if (!UseSourceCode)
             {
-                Downloader.Filename = Releases[SelectedVersionIndex].assets[SelectedAssetIndex].name;
-                LastSelectedAssetIndex = SelectedAssetIndex;
+                SelectedAssetIndex = EditorGUILayout.Popup(SelectedAssetIndex, Assets, GUILayout.Width(DropdownWidth));
+                if (update || SelectedAssetIndex != LastSelectedAssetIndex)
+                {
+                    Downloader.Filename = Releases[SelectedVersionIndex].assets[SelectedAssetIndex].name;
+                    LastSelectedAssetIndex = SelectedAssetIndex;
+                }
             }
+            return true;
         }
 
         public override void Fetch()
@@ -174,7 +195,15 @@ public partial class CommunityFeaturesDownloader
                 ReleaseCache.Add(Feature.Name, new List<ReleaseInfo>());
             else _ready = true;
             Repo = Feature.DownloadData["Repo"];
+            string useSourceCode;
+            UseSourceCode = Feature.DownloadData.TryGetValue("UseSourceCode", out useSourceCode) &&
+                            useSourceCode == "true";
             ContentType = Feature.DownloadData["ContentType"];
+            string contentTypes;
+            if(Feature.DownloadData.TryGetValue("ContentTypes", out contentTypes))
+                ContentTypes = contentTypes.Split(';');
+            Feature.DownloadData.TryGetValue("NamePattern", out NamePattern);
+            Feature.DownloadData.TryGetValue("TagPattern", out TagPattern);
             Feature.DownloadData.TryGetValue("Default", out DefaultAsset);
         }
 
@@ -186,23 +215,37 @@ public partial class CommunityFeaturesDownloader
                 if (CurrentRequest == null)
                 {
                     CurrentRequest = new WWW(
-                        String.Format("https://qkrisi.xyz/ktane/gh_releases/{0}/{1}/{2}", Repo, ResultsPerPage,
+                        String.Format("https://qkrisi.hu/ktane/gh_releases/{0}/{1}/{2}", Repo, ResultsPerPage,
                             PageNumber++));
                     return;
                 }
                 if (!CurrentRequest.isDone)
                     return;
+                if(!string.IsNullOrEmpty(CurrentRequest.error))
+                {
+                    Debug.LogError(String.Format("Error while fetching GitHub releases for {0}: {1}", Repo, CurrentRequest.error));
+                    _ready = true;
+                    return;
+                }
                 var page = JsonConvert.DeserializeObject<ReleaseInfo[]>(CurrentRequest.text);
                 var count = page.Length;
-                page = page.Select(r =>
+                if (!UseSourceCode)
                 {
-                    r.assets = r.assets.Where(a => a.content_type == ContentType).ToArray();
-                    return r;
-                }).Where(r => r.assets.Length != 0).ToArray();
+                    page = page.Select(r =>
+                    {
+                        r.assets = r.assets.Where(a =>
+                            (a.content_type == ContentType || ContentTypes.Contains(a.content_type)) &&
+                            (string.IsNullOrEmpty(NamePattern) ||
+                             Regex.IsMatch(a.name, NamePattern, RegexOptions.IgnoreCase))).ToArray();
+                        return r;
+                    }).Where(r => r.assets.Length > 0).ToArray();
+                }
                 ReleaseCache[Feature.Name].AddRange(page);
                 if (count < ResultsPerPage)
                 {
-                    VersionTags = Releases.Select(r => r.tag_name).ToArray();
+                    VersionTags = Releases.Select(r => r.tag_name).Where(t =>
+                            string.IsNullOrEmpty(TagPattern) || Regex.IsMatch(t, TagPattern, RegexOptions.IgnoreCase))
+                        .ToArray();
                     _ready = true;
                 }
                 CurrentRequest = null;
