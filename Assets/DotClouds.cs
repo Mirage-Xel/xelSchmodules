@@ -24,6 +24,7 @@ public class DotClouds : MonoBehaviour {
             if (puzzle.Contains(i)) if (i == puzzle[puzzle.Count() - 1]) { clouds[i].Target(); } else clouds[i].Decoy();
             else clouds[i].gameObject.SetActive(false);
         }
+        GetComponent<KMSelectable>().UpdateChildren();
         GetComponent<KMBombModule>().OnActivate += delegate
         {
             int counter = 0;
